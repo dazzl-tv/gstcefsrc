@@ -24,6 +24,13 @@ GST_DEBUG_CATEGORY_STATIC (cef_console_debug);
 #define DEFAULT_LOG_SEVERITY LOGSEVERITY_DISABLE
 #define DEFAULT_SANDBOX TRUE
 
+#define VIDEO_WIDTH_MAX 1920
+#define VIDEO_WIDTH_MIN 426
+#define VIDEO_HEIGHT_MAX 1080
+#define VIDEO_HEIGHT_MIN 240
+#define VIDEO_FPS_MAX 60
+#define VIDEO_FPS_MIN 25
+
 static gboolean cef_inited = FALSE;
 static gboolean init_result = FALSE;
 static GMutex init_lock;
@@ -57,6 +64,9 @@ enum
 {
   PROP_0,
   PROP_URL,
+  PROP_HEIGHT,
+  PROP_WIDTH,
+  PROP_FPS,
   PROP_GPU,
   PROP_CHROMIUM_DEBUG_PORT,
   PROP_CHROME_EXTRA_FLAGS,
@@ -388,11 +398,15 @@ class App : public CefApp
   {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     command_line->AppendSwitch("enable-media-stream");
+    command_line->AppendSwitch("disable-application-cache");
+    command_line->AppendSwitch("disable-cache");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
 
     if (!src->gpu) {
       // Optimize for no gpu usage
+      command_line->AppendSwitch("disable-gpu-program-cache");
+      command_line->AppendSwitch("disable-gpu-shader-disk-cache");
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
     }
@@ -685,18 +699,19 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
 static GstCaps *
 gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
 {
+  GstCefSrc *src = GST_CEF_SRC (base_src);
   GstStructure *structure;
 
   caps = gst_caps_make_writable (caps);
   structure = gst_caps_get_structure (caps, 0);
 
-  gst_structure_fixate_field_nearest_int (structure, "width", DEFAULT_WIDTH);
-  gst_structure_fixate_field_nearest_int (structure, "height", DEFAULT_HEIGHT);
+  gst_structure_fixate_field_nearest_int (structure, "width", src->vinfo.width);
+  gst_structure_fixate_field_nearest_int (structure, "height", src->vinfo.height);
 
   if (gst_structure_has_field (structure, "framerate"))
-    gst_structure_fixate_field_nearest_fraction (structure, "framerate", DEFAULT_FPS_N, DEFAULT_FPS_D);
+    gst_structure_fixate_field_nearest_fraction (structure, "framerate", src->vinfo.fps_n, DEFAULT_FPS_D);
   else
-    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, NULL);
+    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, src->vinfo.fps_n, DEFAULT_FPS_D, NULL);
 
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (base_src, caps);
@@ -779,6 +794,21 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->log_severity = (cef_log_severity_t) g_value_get_enum (value);
       break;
     }
+    case PROP_HEIGHT:
+    {
+      src->vinfo.height = g_value_get_int (value);
+      break;
+    }
+    case PROP_WIDTH:
+    {
+      src->vinfo.width = g_value_get_int (value);
+      break;
+    }
+    case PROP_FPS:
+    {
+      src->vinfo.fps_n = g_value_get_int (value);
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -812,6 +842,15 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
       break;
     case PROP_LOG_SEVERITY:
       g_value_set_enum (value, src->log_severity);
+      break;
+    case PROP_HEIGHT:
+      g_value_set_int (value, src->vinfo.height);
+      break;
+    case PROP_WIDTH:
+      g_value_set_int (value, src->vinfo.width);
+      break;
+    case PROP_FPS:
+      g_value_set_int (value, src->vinfo.fps_n);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -847,6 +886,9 @@ gst_cef_src_init (GstCefSrc * src)
   src->current_buffer = NULL;
   src->audio_buffers = NULL;
   src->audio_events = NULL;
+  src->vinfo.height = DEFAULT_HEIGHT;
+  src->vinfo.width = DEFAULT_WIDTH;
+  src->vinfo.fps_n = DEFAULT_FPS_N;
   src->started = FALSE;
   src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
   src->sandbox = DEFAULT_SANDBOX;
@@ -881,6 +923,21 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
     g_param_spec_boolean ("gpu", "gpu",
           "Enable GPU usage in chromium (Improves performance if you have GPU)",
           DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_HEIGHT,
+    g_param_spec_int("height", "height",
+          "Height of the video resolution",
+          VIDEO_HEIGHT_MIN, VIDEO_HEIGHT_MAX, DEFAULT_HEIGHT, (GParamFlags) (G_PARAM_READWRITE)));
+
+  g_object_class_install_property (gobject_class, PROP_WIDTH,
+    g_param_spec_int("width", "width",
+          "Width of the video resolution",
+          VIDEO_WIDTH_MIN, VIDEO_WIDTH_MAX, DEFAULT_WIDTH, (GParamFlags) (G_PARAM_READWRITE)));
+
+  g_object_class_install_property (gobject_class, PROP_WIDTH,
+    g_param_spec_int("framerate", "framerate",
+          "Framerate of the video resolution",
+          VIDEO_FPS_MIN, VIDEO_FPS_MAX, DEFAULT_FPS_N, (GParamFlags) (G_PARAM_READWRITE)));
 
   g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
     g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
