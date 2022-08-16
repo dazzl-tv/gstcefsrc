@@ -18,12 +18,37 @@
 GST_DEBUG_CATEGORY_STATIC (cef_src_debug);
 #define GST_CAT_DEFAULT cef_src_debug
 
+/* 
 #define DEFAULT_WIDTH 1920
 #define DEFAULT_HEIGHT 1080
 #define DEFAULT_FPS_N 30
 #define DEFAULT_FPS_D 1
 #define DEFAULT_URL "https://www.google.com"
 #define DEFAULT_GPU FALSE
+#define DEFAULT_CHROMIUM_DEBUG_PORT -1
+*/
+
+#define VIDEO_WIDTH_MAX       1920
+#define VIDEO_WIDTH_MIN       426
+#define VIDEO_WIDTH_DEFAULT   VIDEO_WIDTH_MIN
+
+#define VIDEO_HEIGHT_MAX      1080
+#define VIDEO_HEIGHT_MIN      240
+#define VIDEO_HEIGHT_DEFAULT  VIDEO_HEIGHT_MIN
+
+#define VIDEO_FPS_MAX         60
+#define VIDEO_FPS_MIN         25
+#define VIDEO_FPS_DEFAULT     30
+#define VIDEO_FPS_DEFAULT_N   30
+#define VIDEO_FPS_DEFAULT_D   1
+
+//#define DEFAULT_URL "https://webglsamples.org/aquarium/aquarium.html"
+//#define DEFAULT_URL "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_5MB.mp4"
+//#define DEFAULT_URL "https://html5test.com"
+//#define DEFAULT_URL "https://www.google.com"
+#define URL_DEFAULT "https://soundcloud.com/platform/sama"
+
+#define GPU_DEFAULT FALSE
 #define DEFAULT_CHROMIUM_DEBUG_PORT -1
 
 static gboolean cef_inited = FALSE;
@@ -35,6 +60,9 @@ enum
 {
   PROP_0,
   PROP_URL,
+  PROP_HEIGHT,
+  PROP_WIDTH,
+  PROP_FPS,
   PROP_GPU,
   PROP_CHROMIUM_DEBUG_PORT,
   PROP_CHROME_EXTRA_FLAGS
@@ -77,7 +105,9 @@ class RenderHandler : public CefRenderHandler
     {
 	  GST_LOG_OBJECT(element, "getting view rect");
       GST_OBJECT_LOCK (element);
-      rect = CefRect(0, 0, element->vinfo.width ? element->vinfo.width : DEFAULT_WIDTH, element->vinfo.height ? element->vinfo.height : DEFAULT_HEIGHT);
+      //printf("RenderHandler / element->vinfo.width = %d\n", element->vinfo.width);
+      //printf("RenderHandler / element->vinfo.height = %d\n", element->vinfo.height);
+      rect = CefRect(0, 0, element->vinfo.width ? element->vinfo.width : VIDEO_WIDTH_DEFAULT, element->vinfo.height ? element->vinfo.height : VIDEO_HEIGHT_DEFAULT);
       GST_OBJECT_UNLOCK (element);
     }
 
@@ -319,11 +349,15 @@ class App : public CefApp
   {
     command_line->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
     command_line->AppendSwitch("enable-media-stream");
+    command_line->AppendSwitch("disable-application-cache");
+    command_line->AppendSwitch("disable-cache");
     command_line->AppendSwitch("disable-dev-shm-usage"); /* https://github.com/GoogleChrome/puppeteer/issues/1834 */
     command_line->AppendSwitch("enable-begin-frame-scheduling"); /* https://bitbucket.org/chromiumembedded/cef/issues/1368 */
 
     if (!src->gpu) {
       // Optimize for no gpu usage
+      command_line->AppendSwitch("disable-gpu-program-cache");
+      command_line->AppendSwitch("disable-gpu-shader-disk-cache");
       command_line->AppendSwitch("disable-gpu");
       command_line->AppendSwitch("disable-gpu-compositing");
     }
@@ -611,19 +645,25 @@ gst_cef_src_query (GstBaseSrc * base_src, GstQuery * query)
 static GstCaps *
 gst_cef_src_fixate (GstBaseSrc * base_src, GstCaps * caps)
 {
+  GstCefSrc *src = GST_CEF_SRC (base_src);
   GstStructure *structure;
 
   caps = gst_caps_make_writable (caps);
   structure = gst_caps_get_structure (caps, 0);
 
-  gst_structure_fixate_field_nearest_int (structure, "width", DEFAULT_WIDTH);
-  gst_structure_fixate_field_nearest_int (structure, "height", DEFAULT_HEIGHT);
+  //gst_structure_fixate_field_nearest_int (structure, "width", DEFAULT_WIDTH);
+  gst_structure_fixate_field_nearest_int (structure, "width", src->vinfo.width);
 
-  if (gst_structure_has_field (structure, "framerate"))
-    gst_structure_fixate_field_nearest_fraction (structure, "framerate", DEFAULT_FPS_N, DEFAULT_FPS_D);
-  else
-    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, NULL);
+  //gst_structure_fixate_field_nearest_int (structure, "height", DEFAULT_HEIGHT);
+  gst_structure_fixate_field_nearest_int (structure, "height", src->vinfo.height);
 
+  if (gst_structure_has_field (structure, "framerate")) {
+    //gst_structure_fixate_field_nearest_fraction (structure, "framerate", DEFAULT_FPS_N, DEFAULT_FPS_D);
+    gst_structure_fixate_field_nearest_fraction (structure, "framerate", src->vinfo.fps_n, VIDEO_FPS_DEFAULT_D);
+  } else {
+    //gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, DEFAULT_FPS_N, DEFAULT_FPS_D, NULL);
+    gst_structure_set (structure, "framerate", GST_TYPE_FRACTION, src->vinfo.fps_n, VIDEO_FPS_DEFAULT_D, NULL);
+  }
 
   caps = GST_BASE_SRC_CLASS (parent_class)->fixate (base_src, caps);
 
@@ -691,6 +731,21 @@ gst_cef_src_set_property (GObject * object, guint prop_id, const GValue * value,
       src->chromium_debug_port = g_value_get_int (value);
       break;
     }
+    case PROP_HEIGHT:
+    {
+      src->vinfo.height = g_value_get_int (value);
+      break;
+    }
+    case PROP_WIDTH:
+    {      
+      src->vinfo.width = g_value_get_int (value);
+      break;
+    }
+    case PROP_FPS:
+    {
+      src->vinfo.fps_n = g_value_get_int (value);
+      break;
+    }  
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -705,17 +760,40 @@ gst_cef_src_get_property (GObject * object, guint prop_id, GValue * value,
 
   switch (prop_id) {
     case PROP_URL:
+    {
       g_value_set_string (value, src->url);
       break;
+    }
     case PROP_CHROME_EXTRA_FLAGS:
+    {
       g_value_set_string (value, src->chrome_extra_flags);
       break;
+    }
     case PROP_GPU:
+    {
       g_value_set_boolean (value, src->gpu);
       break;
+    }
     case PROP_CHROMIUM_DEBUG_PORT:
+    {
       g_value_set_int (value, src->chromium_debug_port);
       break;
+    }
+    case PROP_HEIGHT:
+    {
+      g_value_set_int (value, src->vinfo.height);
+      break;
+    }
+    case PROP_WIDTH:
+    {
+      g_value_set_int (value, src->vinfo.width);
+      break;
+    }
+    case PROP_FPS:
+    {
+      g_value_set_int (value, src->vinfo.fps_n);
+      break;
+    }  
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -748,6 +826,9 @@ gst_cef_src_init (GstCefSrc * src)
   src->current_buffer = NULL;
   src->audio_buffers = NULL;
   src->audio_events = NULL;
+  src->vinfo.height = VIDEO_HEIGHT_DEFAULT;
+  src->vinfo.width = VIDEO_WIDTH_DEFAULT;
+  src->vinfo.fps_n = VIDEO_FPS_DEFAULT; 
   src->started = FALSE;
   src->chromium_debug_port = DEFAULT_CHROMIUM_DEBUG_PORT;
 
@@ -770,27 +851,72 @@ gst_cef_src_class_init (GstCefSrcClass * klass)
   gobject_class->get_property = gst_cef_src_get_property;
   gobject_class->finalize = gst_cef_src_finalize;
 
-  g_object_class_install_property (gobject_class, PROP_URL,
-      g_param_spec_string ("url", "url",
-          "The URL to display",
-          DEFAULT_URL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
+g_object_class_install_property (gobject_class, 
+                                   PROP_URL,
+                                   g_param_spec_string ("url", 
+                                                        "url",
+                                                        "The URL to display",
+                                                        URL_DEFAULT, 
+                                                        (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
 
-  g_object_class_install_property (gobject_class, PROP_GPU,
-    g_param_spec_boolean ("gpu", "gpu",
-          "Enable GPU usage in chromium (Improves performance if you have GPU)",
-          DEFAULT_GPU, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+  g_object_class_install_property (gobject_class, 
+                                   PROP_GPU,
+                                   g_param_spec_boolean ("gpu", 
+                                                         "gpu",
+                                                         "Enable GPU usage in chromium (Improves performance if you have GPU)",
+                                                         GPU_DEFAULT, 
+                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
-  g_object_class_install_property (gobject_class, PROP_CHROMIUM_DEBUG_PORT,
-    g_param_spec_int ("chromium-debug-port", "chromium-debug-port",
-          "Set chromium debug port (-1 = disabled) "
-          "deprecated: use chrome-extra-flags instead", -1, G_MAXUINT16,
-          DEFAULT_CHROMIUM_DEBUG_PORT, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+  g_object_class_install_property (gobject_class, 
+                                   PROP_CHROMIUM_DEBUG_PORT,
+                                   g_param_spec_int ("chromium-debug-port",
+                                                     "chromium-debug-port",
+                                                     "Set chromium debug port (-1 = disabled) "
+                                                     "deprecated: use chrome-extra-flags instead", 
+                                                     -1, 
+                                                     G_MAXUINT16,
+                                                     DEFAULT_CHROMIUM_DEBUG_PORT, 
+                                                     (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
 
-  g_object_class_install_property (gobject_class, PROP_CHROME_EXTRA_FLAGS,
-    g_param_spec_string ("chrome-extra-flags", "chrome-extra-flags",
-          "Comma delimiter flags to be passed into chrome "
-          "(Example: show-fps-counter,remote-debugging-port=9222)",
-          NULL, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+  g_object_class_install_property (gobject_class, 
+                                   PROP_CHROME_EXTRA_FLAGS,
+                                   g_param_spec_string ("chrome-extra-flags", 
+                                                        "chrome-extra-flags",
+                                                        "Comma delimiter flags to be passed into chrome "
+                                                        "(Example: show-fps-counter,remote-debugging-port=9222)",
+                                                        NULL, 
+                                                        (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, 
+                                   PROP_HEIGHT,
+                                   g_param_spec_int ("height",
+                                                     "Height",
+                                                     "Height of the video resolution",
+                                                     VIDEO_HEIGHT_MIN, 
+                                                     VIDEO_HEIGHT_MAX,
+                                                     VIDEO_HEIGHT_DEFAULT,
+                                                     (GParamFlags) (G_PARAM_READWRITE)));
+
+  g_object_class_install_property (gobject_class, 
+                                   PROP_WIDTH,
+                                   g_param_spec_int ("width",
+                                                     "Width",
+                                                     "Width of the video resolution",
+                                                     VIDEO_WIDTH_MIN, 
+                                                     VIDEO_WIDTH_MAX,
+                                                     VIDEO_WIDTH_DEFAULT,
+                                                     (GParamFlags) (G_PARAM_READWRITE)));
+
+  g_object_class_install_property (gobject_class, 
+                                   PROP_FPS,
+                                   g_param_spec_int ("framerate",
+                                                     "Framerate",
+                                                     "Framerate of the video",
+                                                     VIDEO_FPS_MIN, 
+                                                     VIDEO_FPS_MAX,
+                                                     VIDEO_FPS_DEFAULT,
+                                                     (GParamFlags) (G_PARAM_READWRITE)));
+
 
   gst_element_class_set_static_metadata (gstelement_class,
       "Chromium Embedded Framework source", "Source/Video",

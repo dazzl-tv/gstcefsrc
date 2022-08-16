@@ -11,8 +11,12 @@ if(POLICY CMP0074)
     cmake_policy(SET CMP0074 NEW)
 endif()
 
-set(CEF_VERSION "98.2.0+g78c653a+chromium-98.0.4758.102")
+#set(CEF_VERSION "98.2.1+g29d6e22+chromium-98.0.4758.109")
+set(CEF_VERSION "104.4.18+g2587cf2+chromium-104.0.5112.81")
+message(STATUS "CEF_VERSION='${CEF_VERSION}' ")
+
 STRING(REGEX REPLACE "\\+" "%2B" CEF_ESCAPED_VERSION ${CEF_VERSION})
+message(STATUS "CEF_ESCAPED_VERSION='${CEF_ESCAPED_VERSION}' ")
 
 # Determine the platform.
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
