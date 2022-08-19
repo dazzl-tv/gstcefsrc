@@ -3,3 +3,4 @@ build/
 .vscode/
 *.tar.bz2
 *.tar.bz2.sha1
+*.sha1
