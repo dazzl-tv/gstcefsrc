@@ -4,7 +4,9 @@
 #
 # 	Ex : ./generate_sha1.sh cef_binary_104.4.18+g2587cf2+chromium-104.0.5112.81_linux64.tar.bz2
 #
-
+echo "-------------------------------------------------------------"
+echo "  GENERATING CHECKSUM SHA1 FOR CEF BUILD  "
+echo "-------------------------------------------------------------"
 if [ "$#" != "1" ]; then
 	echo "Missing mandatory filename !"
     echo "Usage : ./generate_sha1.sh <DAZZL_CEF_BZ2_TARBALL>"
@@ -12,7 +14,10 @@ if [ "$#" != "1" ]; then
 	exit
 fi
 TARBALL="$1"
+echo -n " - Checking '${TARBALL}' :"
 if [ -e "${TARBALL}" ]; then
+    echo " OK (well found, let's continue the process) "
+	echo " - ${TARBALL} well found, let's continue the process"
 	echo " - Generating sha1 for the tarball provided ${TARBALL}..."
 	sha1sum "${TARBALL}"|awk '{ print $1 }'|tr -d '\n' > "${TARBALL}".sha1
 	RET="$?"
@@ -27,6 +32,6 @@ if [ -e "${TARBALL}" ]; then
 		echo "[ERROR] Problem while generating the sha1!" 
 	fi
 else
-	echo "Cannot found the cef tarball!"
+	echo " NOK (Cannot found the cef tarball) "
 fi
 # — EOF
