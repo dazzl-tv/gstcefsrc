@@ -7,6 +7,7 @@ all:
 	rm -f rtspclientsink_1.16.2_all.deb
 	rm -fR usr/
 	rm -fR third_party/
+	ls -alh ./build-cef-104/Release
 
 clean:
 	cd build-cef-104/ && make clean

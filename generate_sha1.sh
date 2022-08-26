@@ -14,20 +14,22 @@ if [ "$#" != "1" ]; then
 	exit
 fi
 TARBALL="$1"
-echo -n " - Checking '${TARBALL}' :"
-if [ -e "${TARBALL}" ]; then
+REAL_TARBALL="`realpath ${TARBALL}`"
+BASENAME_TARBALL="`basename ${REAL_TARBALL}`"
+echo -n " - Checking '${REAL_TARBALL}' :"
+if [ -e "${REAL_TARBALL}" ]; then
     echo " OK (well found, let's continue the process) "
-	echo " - ${TARBALL} well found, let's continue the process"
-	echo " - Generating sha1 for the tarball provided ${TARBALL}..."
-	sha1sum "${TARBALL}"|awk '{ print $1 }'|tr -d '\n' > "${TARBALL}".sha1
+	echo " - ${REAL_TARBALL} well found, let's continue the process"
+	echo " - Generating sha1 for the tarball provided ${REAL_TARBALL}..."
+	sha1sum "${REAL_TARBALL}"|awk '{ print $1 }'|tr -d '\n' > "${REAL_TARBALL}".sha1
 	RET="$?"
 	echo "RET=${RET}"
-	if [ "${RET}" == "0" ] && [ -e "${TARBALL}.sha1" ]; then
+	if [ "${RET}" == "0" ] && [ -e "${REAL_TARBALL}.sha1" ]; then
 		echo "The sha1 have been well generated!"
-		echo "-> ${TARBALL}.sha1"
-		ls -alh "${TARBALL}.sha1"
-		file    "${TARBALL}.sha1"
-		od -c   "${TARBALL}.sha1"
+		echo "-> ${REAL_TARBALL}.sha1"
+		ls -alh "${REAL_TARBALL}.sha1"
+		file    "${REAL_TARBALL}.sha1"
+		od -c   "${REAL_TARBALL}.sha1"
 	else
 		echo "[ERROR] Problem while generating the sha1!" 
 	fi
